@@ -1,0 +1,30 @@
+{
+    "name": "php-baremetal/ext-i2c",
+    "description": "Baremetal\\I2c\\Bus + \\Device and the device-driver framework. Drivers are packages registering into the i2c_drivers registry; the platform side is an i2c-hal package.",
+    "type": "bm-ext",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Gianfrancesco Aurecchia",
+            "email": "gianfri@aurecchia.com"
+        }
+    ],
+    "require": {
+        "php": ">=8.3",
+        "php-baremetal/i2c-hal": "^1.0",
+        "php-baremetal/ext-events": "^1.0",
+        "php-baremetal/bm-common": "^1.0"
+    },
+    "extra": {
+        "baremetal": {
+            "module": "i2c",
+            "priority": 100,
+            "registries": {
+                "i2c_drivers": {
+                    "type": "i2c_driver_desc_t",
+                    "header": "i2c_driver_desc.h"
+                }
+            }
+        }
+    }
+}
