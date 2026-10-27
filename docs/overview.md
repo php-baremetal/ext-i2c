@@ -27,7 +27,7 @@ raising an event per sample.
 | `php-baremetal/ext-events` | Event delivery for `poll(..., event: ...)` and the `SamplesReady` class. Its HAL (`esp32-events-hal`) is added the same way. |
 | `php-baremetal/bm-common` | The shared `bm_err.h` error codes. |
 
-You never require the HAL yourself. Conductor reads the platform from `extra.baremetal.sdk` (`esp32@^1.0` gives
+You never require the HAL yourself. Conductor reads the platform from `extra.baremetal.sdk` (`esp32@^2.0` gives
 `esp32`) and adds `php-baremetal/esp32-i2c-hal` and `php-baremetal/esp32-events-hal` while Composer resolves. The
 extension's PHP module is `i2c`.
 
@@ -75,7 +75,7 @@ SDA 11 / SCL 10):
   },
   "extra": {
     "baremetal": {
-      "sdk": "esp32@^1.0",
+      "sdk": "esp32@^2.0",
       "board": "waveshare-esp32-s3-touch-lcd-1.85b",
       "runtime": "init-loop",
       "storage": "embedded"

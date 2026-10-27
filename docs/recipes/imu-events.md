@@ -39,7 +39,7 @@ sample raises `SamplesReady`; the handler reads every sample collected since the
   },
   "extra": {
     "baremetal": {
-      "sdk": "esp32@^1.0",
+      "sdk": "esp32@^2.0",
       "board": "waveshare-esp32-s3-touch-lcd-1.85b",
       "runtime": "event-driven",
       "storage": "embedded"
