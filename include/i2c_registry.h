@@ -28,6 +28,7 @@
 #define I2C_DEFAULT_HZ     (100000u)
 #define I2C_SCAN_FIRST     (0x08)
 #define I2C_SCAN_LAST      (0x77)
+#define I2C_MAX_HZ         (1000000u)
 
 typedef enum {
     I2C_OWNER_SYNC  = 0,   /* the caller owns the wire; a per-bus lock guards each transaction */

@@ -56,8 +56,8 @@ See [Bus ownership and power-save](../reference/ownership-and-power.md) for when
 
 <!-- @method name="Bus::device(int $address, int $hz = 100000): Device" returns="Device" visibility="public" -->
 
-Attaches the chip at 7-bit `$address` with clock `$hz` and returns a raw `Device`. Same as
-`new Device($bus, $address, $hz)`.
+Attaches the chip at 7-bit `$address` (`0x08` to `0x77`) with clock `$hz` (1 to 1000000) and returns a raw
+`Device`; values out of range throw `\ValueError`. Same as `new Device($bus, $address, $hz)`.
 
 Devices are kept per bus and address: asking again for an address returns the existing device (the new `$hz`
 is ignored). If a driver class already holds that address, it throws

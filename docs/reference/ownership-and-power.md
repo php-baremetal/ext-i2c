@@ -43,7 +43,7 @@ The SDK option `power-save` (`"options": { "power-save": "on" }` in `extra.barem
 sleep automatically whenever every task is waiting.
 
 - `new Bus(..., owner: Bus::CORE1)` throws while power-save is on:
-  `I2cBus::CORE1 polling keeps the CPU busy and defeats power_save; use I2cBus::SYNC`. Use `Bus::SYNC`.
+  `Bus::CORE1 is not available with the power-save option; use Bus::SYNC`. Use `Bus::SYNC`.
 - `poll()` is accepted on a `SYNC` bus, but the sampler wakes the chip once per period, so the chip never
   sleeps longer than `1000 / $hz` ms. ext-i2c has no call that stops a sampler, so keep rates low and start
   one only when the project needs it.

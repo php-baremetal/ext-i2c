@@ -138,9 +138,9 @@ that). ext-i2c 1.0 reads these:
 | Field | Meaning |
 | --- | --- |
 | `name` | Registry name, reported by `Bus::scan()` and in constructor errors, e.g. `"qmi8658"`. |
-| `php_class` | Short class name; the class is `Baremetal\I2c\Driver\<php_class>`. Must be unique among installed drivers; the full name must fit in 95 characters. |
+| `php_class` | Short class name; the class is `Baremetal\I2c\Driver\<php_class>`. Must be unique among installed drivers. |
 | `capability` | Interface FQN the class implements, e.g. `"Baremetal\\Sensor\\Imu"`, or `NULL`. A name that does not exist yet is registered as a new marker interface. |
-| `default_addrs`, `n_default_addrs` | Default address when the constructor gets none: `default_addrs[0]` when `n_default_addrs` is not 0, else 0. The other entries are not tried. |
+| `default_addrs`, `n_default_addrs` | Default address when the constructor gets none: `default_addrs[0]` when `n_default_addrs` is not 0; with no default the address must be passed (else `\ValueError`). The other entries are not tried. |
 | `default_hz` | Default clock when the constructor gets none; 0 means 100 kHz. |
 | `state_size` | Bytes allocated (zeroed) per device before `init`. The driver-facing header has no accessor for this block, so drivers in this release keep it 0. |
 | `init` | Called once when the device is first created, on the PHP task. Return `BM_OK`, or an error code that the constructor reports (`BM_ERR_NOT_FOUND` for a wrong chip identity). |

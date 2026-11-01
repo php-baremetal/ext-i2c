@@ -93,6 +93,9 @@ PHP_METHOD(I2cDevice, __construct)
         Z_PARAM_LONG(hz)
     ZEND_PARSE_PARAMETERS_END();
 
+    if (!i2c_check_addr_hz(2, addr, 3, hz)) {
+        RETURN_THROWS();
+    }
     i2c_bus_object *bo = i2c_bus_object_from(Z_OBJ_P(zbus));
     if (!bo->bus) {
         zend_throw_exception(zend_ce_exception, "I2c\\Bus is not initialised", 0);
@@ -275,6 +278,14 @@ PHP_METHOD(I2cDevice, poll)
     if (!d) {
         RETURN_THROWS();
     }
+    uint16_t tag = 0;
+    if (event && !bm_events_source_tag(event, &tag)) {   /* before the poller starts */
+        if (!EG(exception)) {
+            zend_throw_exception_ex(zend_ce_exception, 0,
+                "poll(): unknown event class '%s' or too many sources", ZSTR_VAL(event));
+        }
+        RETURN_THROWS();
+    }
     d->poller = bm_i2c_hal_poll_start(d, (uint32_t) hz, (size_t) depth);
     if (!d->poller) {
         zend_throw_exception(zend_ce_exception, "cannot start poller (too many, or out of memory)", 0);
@@ -283,12 +294,6 @@ PHP_METHOD(I2cDevice, poll)
     if (event) {
         /* Emit an event per sample with this device as $e->device; hold a ref so the object outlives
          * any PHP variable. */
-        uint16_t tag;
-        if (!bm_events_source_tag(event, &tag)) {
-            zend_throw_exception_ex(zend_ce_exception, 0,
-                "poll(): unknown event class '%s' or too many sources", ZSTR_VAL(event));
-            RETURN_THROWS();
-        }
         if (d->emit_obj != Z_OBJ_P(ZEND_THIS)) {
             /* Stop the notify first (afterwards the poller no longer reads emit_obj), then release the
              * old object only after the events already queued with it. */
@@ -369,6 +374,7 @@ void i2c_device_class_register(void)
     memcpy(&i2c_device_handlers, zend_get_std_object_handlers(), sizeof(zend_object_handlers));
     i2c_device_handlers.offset = XtOffsetOf(i2c_device_object, std);
     i2c_device_handlers.free_obj = i2c_device_free;
+    i2c_device_handlers.clone_obj = NULL;   /* a copy would not own the device: clone throws */
 }
 
 void i2c_capabilities_register(void)
@@ -420,11 +426,11 @@ void i2c_driver_classes_register(void)
         if (!desc || !desc->php_class) {
             continue;
         }
-        char fqn[96];
-        int n = snprintf(fqn, sizeof(fqn), "Baremetal\\I2c\\Driver\\%s", desc->php_class);
+        zend_string *fqn = zend_strpprintf(0, "Baremetal\\I2c\\Driver\\%s", desc->php_class);
         zend_class_entry ce;
-        INIT_CLASS_ENTRY_EX(ce, fqn, n, desc->methods);
+        INIT_CLASS_ENTRY_EX(ce, ZSTR_VAL(fqn), ZSTR_LEN(fqn), desc->methods);
         zend_class_entry *dce = zend_register_internal_class_ex(&ce, i2c_device_ce);
+        zend_string_release(fqn);
         dce->create_object = i2c_device_create;
 
         if (desc->capability) {
@@ -455,8 +461,11 @@ void i2c_driver_ctor(INTERNAL_FUNCTION_PARAMETERS, const i2c_driver_desc_t *desc
     if (addr < 0) {
         addr = desc->n_default_addrs ? desc->default_addrs[0] : 0;
     }
-    if (hz <= 0) {
+    if (hz == 0) {
         hz = desc->default_hz ? desc->default_hz : I2C_DEFAULT_HZ;
+    }
+    if (!i2c_check_addr_hz(2, addr, 3, hz)) {
+        return;
     }
 
     bm_err_t err = BM_OK;

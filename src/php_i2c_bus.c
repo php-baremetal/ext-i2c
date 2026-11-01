@@ -65,13 +65,13 @@ PHP_METHOD(I2cBus, __construct)
     ZEND_PARSE_PARAMETERS_END();
 
     if (owner != I2C_OWNER_SYNC && owner != I2C_OWNER_CORE1) {
-        zend_argument_value_error(4, "must be I2cBus::SYNC or I2cBus::CORE1");
+        zend_argument_value_error(4, "must be Bus::SYNC or Bus::CORE1");
         RETURN_THROWS();
     }
 
     if (owner == I2C_OWNER_CORE1 && bm_events_power_save()) {
         zend_throw_exception(zend_ce_exception,
-            "I2cBus::CORE1 polling keeps the CPU busy and defeats power_save; use I2cBus::SYNC", 0);
+            "Bus::CORE1 is not available with the power-save option; use Bus::SYNC", 0);
         RETURN_THROWS();
     }
 
@@ -94,6 +94,9 @@ PHP_METHOD(I2cBus, device)
         Z_PARAM_LONG(hz)
     ZEND_PARSE_PARAMETERS_END();
 
+    if (!i2c_check_addr_hz(1, addr, 2, hz)) {
+        RETURN_THROWS();
+    }
     i2c_bus_object *o = i2c_bus_object_from(Z_OBJ_P(ZEND_THIS));
     if (!o->bus) {
         zend_throw_exception(zend_ce_exception, "I2c\\Bus is not initialised", 0);
@@ -171,4 +174,5 @@ void i2c_bus_class_register(void)
     memcpy(&i2c_bus_handlers, zend_get_std_object_handlers(), sizeof(zend_object_handlers));
     i2c_bus_handlers.offset = XtOffsetOf(i2c_bus_object, std);
     i2c_bus_handlers.free_obj = i2c_bus_free;
+    i2c_bus_handlers.clone_obj = NULL;   /* a copy would not own the bus: clone throws */
 }

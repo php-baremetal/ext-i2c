@@ -36,6 +36,21 @@ typedef struct {
     zend_object  std;
 } i2c_device_object;
 
+/* Argument checks shared by Bus::device(), new Device() and the driver constructors: a 7-bit address
+ * outside the reserved ranges, and a clock the controllers support. false (with a ValueError) otherwise. */
+static inline bool i2c_check_addr_hz(uint32_t addr_arg, zend_long addr, uint32_t hz_arg, zend_long hz)
+{
+    if (addr < I2C_SCAN_FIRST || addr > I2C_SCAN_LAST) {
+        zend_argument_value_error(addr_arg, "must be a 7-bit address between 0x08 and 0x77");
+        return false;
+    }
+    if (hz < 1 || hz > (zend_long) I2C_MAX_HZ) {
+        zend_argument_value_error(hz_arg, "must be between 1 and 1000000 (Hz)");
+        return false;
+    }
+    return true;
+}
+
 static inline i2c_bus_object *i2c_bus_object_from(zend_object *o)
 {
     return (i2c_bus_object *)((char *)o - XtOffsetOf(i2c_bus_object, std));

@@ -27,10 +27,12 @@ asking for the same address again returns the same device.
 The bus the chip is wired to.
 <!-- @endparam -->
 <!-- @param name="$address" type="int" required -->
-7-bit address, e.g. `0x51`. Not range-checked: pass a 7-bit value.
+7-bit address, e.g. `0x51`, from `0x08` to `0x77`; anything else throws `\ValueError` (the other values are
+reserved by the I2C specification).
 <!-- @endparam -->
 <!-- @param name="$hz" type="int" default="100000" -->
-SCL clock for this device. Ignored when the device already exists.
+SCL clock for this device, 1 to 1000000; anything else throws `\ValueError`. Ignored when the device
+already exists.
 <!-- @endparam -->
 <!-- @endparams -->
 
