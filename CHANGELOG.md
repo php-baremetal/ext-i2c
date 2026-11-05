@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.3
+
+- Docs: errors and limits say that a read can complete with wrong bytes while a line is shorted or bouncing.
+
 ## 1.0.2
 
 - Fixed: `Bus::device()`, `new Device()` and the driver constructors accepted any address and clock, and

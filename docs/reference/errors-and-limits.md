@@ -42,6 +42,11 @@ or a sampler `$hz` that is not greater than 0. Driver methods throw their own `\
 The php-baremetal error names: `address already used by another driver on this bus` and
 `the port or a pin is already used by an I2C bus open with other pins`.
 
+A read that does not throw is not proof that the data is right. I2C has no checksum, and SDA held low looks
+like an acknowledge, so a transfer that starts or ends while a line is shorted or a contact bounces can complete
+with wrong bytes: on the board, an MMC5603 returned `[90, 90, 90]` from `mag()` the moment SDA was tied to GND.
+Once the bus is stuck, transfers throw. When a wrong value matters, check readings for range or repeat them.
+
 ## Limits
 
 | Limit | Value | Source |
