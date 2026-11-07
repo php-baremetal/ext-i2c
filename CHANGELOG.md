@@ -2,6 +2,7 @@
 
 ## 1.1.0
 
+- Added: ide/ext-i2c.stub, the PHP declarations of the package for IDEs (conductor copies it into vendor/php-baremetal/ide-stubs/).
 - Added: Device::poll() returns the device's Baremetal\I2c\Poller (a Baremetal\Source; the same object on every call): stop() pauses sampling, unread samples stay for drain(); start(); setHz() and hz(). Needs php-baremetal/i2c-hal 1.1.
 - Added: Baremetal\I2c\SamplesReady with $count (unread samples in the device's ring at delivery), filled by poll() when the event class extends it; Baremetal\Sensor\Imu\SamplesReady now extends it. poll() takes every: N (one event every N stored samples).
 - Changed: Baremetal\I2c\SamplesReady declares public readonly int $count, so a user class that extends it (or Baremetal\Sensor\Imu\SamplesReady) and redeclares $count no longer compiles.

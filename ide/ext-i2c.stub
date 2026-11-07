@@ -1,0 +1,280 @@
+<?php
+// php-baremetal/ext-i2c 1.1.0 — IDE helper, not loaded at runtime.
+
+namespace Baremetal\Sensor {
+    /**
+     * Capability marker of an IMU driver class (for example Baremetal\I2c\Driver\Qmi8658). No methods.
+     *
+     * Always defined, so type hints resolve even when no driver for it is installed.
+     */
+    interface Imu
+    {
+    }
+
+    /**
+     * Capability marker of a magnetometer driver class (for example Baremetal\I2c\Driver\Mmc5603). No methods.
+     *
+     * Always defined, so type hints resolve even when no driver for it is installed.
+     */
+    interface Magnetometer
+    {
+    }
+}
+
+namespace Baremetal\Input {
+    /**
+     * Capability marker of a touch controller driver class (no packaged driver yet). No methods.
+     *
+     * Always defined, so type hints resolve even when no driver for it is installed.
+     */
+    interface Touch
+    {
+    }
+}
+
+namespace Baremetal\I2c {
+    /**
+     * The event a polled device can raise (poll(event: ...)), with the number of unread samples.
+     *
+     * Its $device property is the polled device. poll() fills $count for this class and its subclasses.
+     */
+    class SamplesReady extends \Baremetal\Event
+    {
+        /**
+         * The unread samples in the device's ring when the event is delivered (at most the ring depth;
+         * drain() takes them and resets it).
+         */
+        public readonly int $count;
+    }
+
+    /**
+     * An I2C master bus on an SDA/SCL pin pair; it lives for the whole run.
+     *
+     * A second new Bus() with the same pins (and a matching or automatic port) returns the same underlying bus.
+     * The bus is reset right after it opens. Internal pull-ups are enabled on SDA and SCL. Any method of an
+     * object whose constructor did not run throws \Exception "I2c\Bus is not initialised"; clone throws \Error.
+     */
+    class Bus
+    {
+        /**
+         * The calling PHP task runs each transaction while holding the bus lock. Default.
+         */
+        public const SYNC = 0;
+
+        /**
+         * The executor task owns the wire; every transaction is handed to it and the caller waits. Refused with
+         * the power-save option.
+         */
+        public const CORE1 = 1;
+
+        /**
+         * Opens (or finds) the master bus on these pins.
+         *
+         * @param int $sda GPIO number of the data line.
+         * @param int $scl GPIO number of the clock line.
+         * @param int $port Hardware I2C port; -1 lets the platform pick the first free port.
+         * @param int $owner Who drives the wire: Bus::SYNC (the PHP task, under a per-bus lock) or Bus::CORE1 (the
+         *                   executor task). Honoured only when the bus is first created.
+         * @throws \ValueError When $owner is neither Bus::SYNC nor Bus::CORE1.
+         * @throws \Exception "Bus::CORE1 is not available with the power-save option; use Bus::SYNC", or
+         *                    "cannot open I2C bus (sda=.. scl=..): ..." when a pin or the port is used by a bus on
+         *                    other pins, all four bus slots are in use, or the platform cannot open the port.
+         */
+        public function __construct(int $sda, int $scl, int $port = -1, int $owner = 0) {}
+
+        /**
+         * Opens the bus the board describes in its i2c block, the same as new Bus($sda, $scl, -1, $owner) with
+         * the pins read from the board.
+         *
+         * @param string $block The board block to read (sda and scl); another block of the same kind.
+         * @param int $owner Bus::SYNC or Bus::CORE1, as in the constructor.
+         * @return Bus The bus.
+         * @throws \RuntimeException "board '<id>' has no '<block>' block", "board '<id>' has a <block> of type
+         *                           '<type>', not 'i2c'", or "board '<id>': <block>.sda is missing" (or .scl).
+         * @throws \ValueError When $owner is neither Bus::SYNC nor Bus::CORE1.
+         * @throws \Exception What the constructor throws when the bus cannot open.
+         */
+        public static function onboard(string $block = 'i2c', int $owner = 0): Bus {}
+
+        /**
+         * Attaches a raw device on this bus; same as new Device($bus, $address, $hz).
+         *
+         * Asking again for an address returns the existing device (the new $hz is ignored).
+         *
+         * @param int $address 7-bit address, 0x08 to 0x77.
+         * @param int $hz SCL clock for this device in Hz, 1 to 1000000.
+         * @return Device The raw device.
+         * @throws \ValueError When $address is outside 0x08 to 0x77 or $hz outside 1 to 1000000.
+         * @throws \Exception "address 0x.. on this bus is already used by another driver", or "cannot add I2C
+         *                    device 0x..: ..." when all 32 device slots are in use or the platform cannot attach it.
+         */
+        public function device(int $address, int $hz = 100000): Device {}
+
+        /**
+         * Probes every address from 0x08 to 0x77 (50 ms each) and returns the ones that answered.
+         *
+         * @return array [address => ['driver' => ?string]]: the registry name of the driver mounted at that
+         *               address (e.g. 'qmi8658'), or null for a raw device or nothing constructed yet.
+         * @throws \Exception "I2C scan aborted, bus stuck (repeated timeouts on SDA=.. SCL=..): ..." after eight
+         *                    consecutive probe timeouts (usually missing pull-ups or swapped pins); the bus is reset.
+         */
+        public function scan(): array {}
+    }
+
+    /**
+     * One chip at a 7-bit address on a bus: raw reads and writes, register access, and background sampling.
+     *
+     * Every driver class under Baremetal\I2c\Driver\ extends it. The object is a handle: dropping it never
+     * touches the hardware, and asking for the same address again returns the same device. A failed transfer
+     * has already been retried once after a bus reset. Any method of an object whose constructor did not run
+     * throws \Exception "I2c\Device is not initialised"; clone throws \Error.
+     */
+    class Device
+    {
+        /**
+         * Attaches the chip at $address on $bus.
+         *
+         * @param Bus $bus The bus the chip is wired to.
+         * @param int $address 7-bit address, e.g. 0x51, from 0x08 to 0x77.
+         * @param int $hz SCL clock for this device in Hz, 1 to 1000000; ignored when the device already exists.
+         * @throws \ValueError When $address is outside 0x08 to 0x77 or $hz outside 1 to 1000000.
+         * @throws \Exception "address 0x.. on this bus is already used by another driver", or "cannot add I2C
+         *                    device 0x..: ..." when all 32 device slots are in use or the platform cannot attach it.
+         */
+        public function __construct(Bus $bus, int $address, int $hz = 100000) {}
+
+        /**
+         * Whether the chip acknowledges its address (50 ms timeout); never throws for a missing chip.
+         *
+         * @return bool True when the chip answered.
+         */
+        public function probe(): bool {}
+
+        /**
+         * Reads bytes from the chip in one transaction.
+         *
+         * @param int $length Number of bytes to read, greater than 0.
+         * @return string The bytes read, as a binary string.
+         * @throws \ValueError When $length is not greater than 0.
+         * @throws \Exception "I2C read failed: ..." when the transfer failed after its retry.
+         */
+        public function read(int $length): string {}
+
+        /**
+         * Writes the bytes of $data in one transaction.
+         *
+         * @param string $data The bytes to write.
+         * @return void
+         * @throws \Exception "I2C write failed: ..." when the transfer failed after its retry.
+         */
+        public function write(string $data): void {}
+
+        /**
+         * Writes the register address, then reads bytes (a combined write-read).
+         *
+         * @param int $reg The register address.
+         * @param int $length Number of bytes to read, greater than 0.
+         * @return string The bytes read, as a binary string: ord() for one byte, unpack() for more.
+         * @throws \ValueError When $length is not greater than 0.
+         * @throws \Exception "I2C readReg 0x.. failed: ..." when the transfer failed after its retry.
+         */
+        public function readReg(int $reg, int $length = 1): string {}
+
+        /**
+         * Writes to a register.
+         *
+         * @param int $reg The register address.
+         * @param string|int $value An int writes one byte (the low 8 bits); a string writes all its bytes after
+         *                          the register address.
+         * @return void
+         * @throws \Exception "I2C writeReg 0x.. failed: ..." when the transfer failed after its retry.
+         */
+        public function writeReg(int $reg, string|int $value): void {}
+
+        /**
+         * Starts (or retunes) background sampling of the chip into a ring buffer, optionally raising an event.
+         *
+         * Only on driver classes whose driver declares a sampler. Calling it again on the same device changes its
+         * rate instead of starting a second sampler, and resumes a stopped one.
+         *
+         * @param int $hz Sampling rate in Hz, 1 to 4294967295; the period is whole milliseconds (1000 / $hz, at
+         *                least 1 ms), so rates above 1000 run at 1000 Hz and other rates round up.
+         * @param int $depth Ring size in samples, at most 256 (larger values are clamped); when the ring is full
+         *                   the oldest unread samples are overwritten.
+         * @param string|null $event Event class to raise after every $every stored samples, usually
+         *                           Baremetal\Sensor\Imu\SamplesReady::class; its $device is this device. null
+         *                           samples silently.
+         * @param bool $coalesce Only with $event: true queues no new event while one of that class is still
+         *                       waiting (counted as coalesced); false queues one per sample (a full queue drops the
+         *                       extra ones).
+         * @param int $every Raise one event every $every stored samples, 1 to the depth of the device's ring (fixed
+         *                   by the first poll() on the device); checked even without $event.
+         * @return Poller The device's poller (the same object on every call while a handle is alive).
+         * @throws \ValueError When $hz is not greater than 0 (or above 4294967295), or "poll(): $every must be
+         *                     between 1 and $depth".
+         * @throws \Exception "this device has no poller (driver has no poll block)" on a raw device or a driver
+         *                    without a sampler; "cannot start poller (too many, or out of memory)" with eight
+         *                    samplers already running; "poll(): unknown event class '...' or too many sources" when
+         *                    $event is not a loaded instantiable class or the event source table (32 entries) is
+         *                    full; "poll() is not available in the web-server runtime: event sources need the
+         *                    event-driven runtime" with an event in the web-server runtime.
+         */
+        public function poll(int $hz, int $depth = 64, ?string $event = null, bool $coalesce = true, int $every = 1): Poller {}
+
+        /**
+         * The most recent raw sample, read from the ring without bus traffic.
+         *
+         * @return string|null The chip's bytes of the latest sample (decode() of the driver turns it into numbers),
+         *                     or null if none has been taken yet.
+         * @throws \Exception "this device has no poller (driver has no poll block)", or "not polling; call poll()
+         *                    first" before poll().
+         */
+        public function sample(): ?string {}
+
+        /**
+         * Every unread sample, oldest first, and marks them read; never touches the bus.
+         *
+         * @return array A list of raw sample strings (at most 256 per call); [] before poll().
+         * @throws \Exception "this device has no poller (driver has no poll block)" on a raw device or a driver
+         *                    without a sampler.
+         */
+        public function drain(): array {}
+    }
+
+    /**
+     * The handle of a device's background sampler, returned by Device::poll(); one per device.
+     *
+     * stop() pauses sampling (no new samples, no events, the chip is not read; unread samples stay for drain()
+     * and sample()); start() resumes, taking the next sample at once and counting the every: window from 0.
+     * Dropping the handle does not stop the sampler. new Poller() throws \Error "Cannot directly construct
+     * Baremetal\I2c\Poller".
+     */
+    final class Poller extends \Baremetal\Source
+    {
+        /**
+         * Changes the sampling rate; on a stopped poller it only saves the rate, applied by start().
+         *
+         * @param int $hz Sampling rate in Hz, 1 to 4294967295.
+         * @return void
+         * @throws \ValueError "Poller::setHz(): $hz must be greater than 0" for 0 or less (or "must be at most
+         *                     4294967295").
+         */
+        public function setHz(int $hz): void {}
+
+        /**
+         * The sampling rate asked for.
+         *
+         * @return int The rate in Hz.
+         */
+        public function hz(): int {}
+    }
+}
+
+namespace Baremetal\Sensor\Imu {
+    /**
+     * The sample event to use for an IMU (poll(event: SamplesReady::class)); it carries $count.
+     */
+    class SamplesReady extends \Baremetal\I2c\SamplesReady
+    {
+    }
+}

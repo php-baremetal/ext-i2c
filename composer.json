@@ -25,7 +25,8 @@
                     "header": "i2c_driver_desc.h"
                 }
             },
-            "board-blocks": ["i2c:i2c"]
+            "board-blocks": ["i2c:i2c"],
+            "ide-stubs": ["ide/ext-i2c.stub"]
         }
     }
 }
