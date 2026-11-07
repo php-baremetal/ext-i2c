@@ -24,6 +24,7 @@ PHP_MINIT_FUNCTION(i2c)
     i2c_events_register();
     i2c_bus_class_register();
     i2c_device_class_register();
+    i2c_poller_class_register();
     i2c_driver_classes_register();
     return SUCCESS;
 }

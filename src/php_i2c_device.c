@@ -228,17 +228,153 @@ PHP_METHOD(I2cDevice, writeReg)
 
 /* poll/sample/drain need a driver with a poll block. The HAL poller fills a ring at `hz`; sample() and
  * drain() read the ring without bus traffic. */
-ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_device_poll, 0, 1, IS_VOID, 0)
+ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO_EX(arginfo_device_poll, 0, 1, Baremetal\\I2c\\Poller, 0)
     ZEND_ARG_TYPE_INFO(0, hz, IS_LONG, 0)
     ZEND_ARG_TYPE_INFO_WITH_DEFAULT_VALUE(0, depth, IS_LONG, 0, "64")
     ZEND_ARG_TYPE_INFO_WITH_DEFAULT_VALUE(0, event, IS_STRING, 1, "null")
+    ZEND_ARG_TYPE_INFO_WITH_DEFAULT_VALUE(0, coalesce, _IS_BOOL, 0, "true")
+    ZEND_ARG_TYPE_INFO_WITH_DEFAULT_VALUE(0, every, IS_LONG, 0, "1")
 ZEND_END_ARG_INFO()
+
+static zend_class_entry *i2c_samples_ready_ce;
+static zend_class_entry *i2c_poller_ce;
+
+/* The record behind a Poller handle: the device (process lifetime) and its PHP object, which the handle keeps alive. */
+typedef struct {
+    i2c_dev_t   *d;
+    zend_object *dev_obj;
+} i2c_poller_rec_t;
+
+static void poller_stop(void *rec)
+{
+    i2c_dev_t *d = ((i2c_poller_rec_t *) rec)->d;
+    if (!d->paused) {
+        bm_i2c_hal_poll_pause(d->poller, true);
+        d->paused = true;
+    }
+}
+
+static void poller_start(void *rec)
+{
+    i2c_dev_t *d = ((i2c_poller_rec_t *) rec)->d;
+    if (d->paused) {
+        bm_i2c_hal_poll_start(d, d->poll_hz, d->depth);   /* applies a setHz() made while stopped */
+        atomic_store(&d->since, 0);
+        bm_i2c_hal_poll_pause(d->poller, false);
+        d->paused = false;
+    }
+}
+
+static bool poller_running(void *rec)
+{
+    return !((i2c_poller_rec_t *) rec)->d->paused;
+}
+
+/* The handle is gone: the device stops pointing at it and lets go of its object; the poller keeps sampling. */
+static void poller_release(void *rec)
+{
+    i2c_poller_rec_t *r = rec;
+    r->d->poller_obj = NULL;
+    zend_object *dev_obj = r->dev_obj;
+    pefree(r, 1);
+    OBJ_RELEASE(dev_obj);
+}
+
+static const bm_source_ops_t poller_ops = { poller_stop, poller_start, poller_running, poller_release };
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_poller_sethz, 0, 1, IS_VOID, 0)
+    ZEND_ARG_TYPE_INFO(0, hz, IS_LONG, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_poller_hz, 0, 0, IS_LONG, 0)
+ZEND_END_ARG_INFO()
+
+PHP_METHOD(I2cPoller, setHz)
+{
+    zend_long hz;
+    ZEND_PARSE_PARAMETERS_START(1, 1)
+        Z_PARAM_LONG(hz)
+    ZEND_PARSE_PARAMETERS_END();
+    if (hz <= 0) {
+        zend_value_error("Poller::setHz(): $hz must be greater than 0");
+        RETURN_THROWS();
+    }
+#if SIZEOF_ZEND_LONG > 4   /* a positive 32-bit zend_long always fits (on the board (zend_long) UINT32_MAX is -1) */
+    if (hz > (zend_long) UINT32_MAX) {
+        zend_value_error("Poller::setHz(): $hz must be at most 4294967295");
+        RETURN_THROWS();
+    }
+#endif
+    i2c_dev_t *d = ((i2c_poller_rec_t *) bm_events_source_rec(Z_OBJ_P(ZEND_THIS)))->d;
+    d->poll_hz = (uint32_t) hz;
+    if (!d->paused) {
+        bm_i2c_hal_poll_start(d, d->poll_hz, d->depth);
+    }
+}
+
+PHP_METHOD(I2cPoller, hz)
+{
+    ZEND_PARSE_PARAMETERS_NONE();
+    RETURN_LONG((zend_long) ((i2c_poller_rec_t *) bm_events_source_rec(Z_OBJ_P(ZEND_THIS)))->d->poll_hz);
+}
+
+static const zend_function_entry i2c_poller_methods[] = {
+    PHP_ME(I2cPoller, setHz, arginfo_poller_sethz, ZEND_ACC_PUBLIC)
+    PHP_ME(I2cPoller, hz,    arginfo_poller_hz,    ZEND_ACC_PUBLIC)
+    PHP_FE_END
+};
+
+void i2c_poller_class_register(void)
+{
+    zend_class_entry *parent = bm_events_source_ce();
+    if (!parent) {
+        return;
+    }
+    zend_class_entry ce;
+    INIT_NS_CLASS_ENTRY(ce, "Baremetal\\I2c", "Poller", i2c_poller_methods);
+    i2c_poller_ce = zend_register_internal_class_ex(&ce, parent);   /* create_object and handlers come from Source */
+    i2c_poller_ce->ce_flags |= ZEND_ACC_FINAL | ZEND_ACC_NOT_SERIALIZABLE;
+}
+
+/* Unread samples in the ring: stored - read, at most the ring depth. */
+static uint32_t i2c_unread(i2c_dev_t *d)
+{
+    int32_t n = (int32_t) (atomic_load(&d->stored) - atomic_load(&d->read));   /* signed: the notify can lag a drain */
+    if (n < 0) {
+        return 0;
+    }
+    return (uint32_t) n > d->depth ? d->depth : (uint32_t) n;
+}
+
+/* SamplesReady::$count, on the PHP task at delivery. */
+static void i2c_samples_fill(zend_object *event, zend_object *device, const evt_t *slot)
+{
+    (void) slot;
+    i2c_dev_t *d = device ? i2c_device_object_from(device)->dev : NULL;
+    if (d) {
+        bm_events_set_long(event, i2c_samples_ready_ce, "count", (long) i2c_unread(d));
+    }
+}
+
+/* Counts a sample, raises nothing (installed while the emit object changes, so no stored sample goes uncounted). */
+static void i2c_count_notify(void *arg)
+{
+    atomic_fetch_add(&((i2c_dev_t *) arg)->stored, 1);
+}
 
 /* Runs on the poller task after each sample: queue the device's event. */
 static void i2c_emit_notify(void *arg)
 {
     i2c_dev_t *d = arg;
-    bm_events_emit(d->emit_tag, d->emit_obj);
+    atomic_fetch_add(&d->stored, 1);
+    if (!atomic_load(&d->emitting)) {
+        return;
+    }
+    unsigned since = atomic_fetch_add(&d->since, 1) + 1;
+    if (since >= atomic_load(&d->every)) {
+        atomic_store(&d->since, 0);
+        bm_events_emit(d->emit_tag, d->emit_obj);
+    }
 }
 
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_device_sample, 0, 0, IS_STRING, 1)
@@ -264,22 +400,50 @@ PHP_METHOD(I2cDevice, poll)
 {
     zend_long hz, depth = 64;
     zend_string *event = NULL;
-    ZEND_PARSE_PARAMETERS_START(1, 3)
+    bool coalesce = true;
+    zend_long every = 1;
+    ZEND_PARSE_PARAMETERS_START(1, 5)
         Z_PARAM_LONG(hz)
         Z_PARAM_OPTIONAL
         Z_PARAM_LONG(depth)
         Z_PARAM_STR_OR_NULL(event)
+        Z_PARAM_BOOL(coalesce)
+        Z_PARAM_LONG(every)
     ZEND_PARSE_PARAMETERS_END();
     if (hz <= 0) {
         zend_argument_value_error(1, "must be greater than 0");
+        RETURN_THROWS();
+    }
+#if SIZEOF_ZEND_LONG > 4   /* a positive 32-bit zend_long always fits (on the board (zend_long) UINT32_MAX is -1) */
+    if (hz > (zend_long) UINT32_MAX) {
+        zend_argument_value_error(1, "must be at most 4294967295");
+        RETURN_THROWS();
+    }
+#endif
+    if (!i2c_poller_ce) {
+        zend_throw_exception(zend_ce_exception, "poll() needs ext-events loaded before ext-i2c (no Baremetal\\Source class)", 0);
         RETURN_THROWS();
     }
     i2c_dev_t *d = this_poller_dev(ZEND_THIS);
     if (!d) {
         RETURN_THROWS();
     }
+    /* The ring the executor uses: depth 0 is 64, above 256 or negative is 256, and a second poll() keeps the first ring.
+     * $every is checked against that depth. */
+    bool first = (d->poller == NULL);
+    zend_long eff = d->depth;
+    if (first) {
+        eff = depth == 0 ? (zend_long) I2C_POLL_DEFAULT_DEPTH : depth;
+        if (eff < 0 || eff > (zend_long) I2C_POLL_MAX_DEPTH) {   /* the executor takes a size_t: negative wraps to the cap */
+            eff = I2C_POLL_MAX_DEPTH;
+        }
+    }
+    if (every < 1 || every > eff) {
+        zend_value_error("poll(): $every must be between 1 and $depth");
+        RETURN_THROWS();
+    }
     uint16_t tag = 0;
-    if (event && !bm_events_source_tag(event, &tag)) {   /* before the poller starts */
+    if (event && !bm_events_source_tag_ex(event, coalesce, &tag)) {   /* before the poller starts */
         if (!EG(exception)) {
             zend_throw_exception_ex(zend_ce_exception, 0,
                 "poll(): unknown event class '%s' or too many sources", ZSTR_VAL(event));
@@ -291,13 +455,22 @@ PHP_METHOD(I2cDevice, poll)
         zend_throw_exception(zend_ce_exception, "cannot start poller (too many, or out of memory)", 0);
         RETURN_THROWS();
     }
+    if (first) {
+        d->depth = (uint32_t) eff;
+    }
+    atomic_store(&d->every, (unsigned) every);
+    atomic_store(&d->since, 0);
     if (event) {
+        zend_class_entry *ece = zend_lookup_class(event);   /* resolved already by the tag lookup */
+        if (ece && i2c_samples_ready_ce && instanceof_function(ece, i2c_samples_ready_ce)) {
+            bm_events_set_filler(tag, i2c_samples_fill);   /* a tag has one filler: only for these classes */
+        }
         /* Emit an event per sample with this device as $e->device; hold a ref so the object outlives
          * any PHP variable. */
         if (d->emit_obj != Z_OBJ_P(ZEND_THIS)) {
             /* Stop the notify first (afterwards the poller no longer reads emit_obj), then release the
              * old object only after the events already queued with it. */
-            bm_i2c_hal_poll_on_sample(d->poller, NULL, NULL);
+            bm_i2c_hal_poll_on_sample(d->poller, i2c_count_notify, d);
             zend_object *prev = d->emit_obj;
             d->emit_obj = Z_OBJ_P(ZEND_THIS);
             GC_ADDREF(Z_OBJ_P(ZEND_THIS));
@@ -306,8 +479,30 @@ PHP_METHOD(I2cDevice, poll)
             }
         }
         d->emit_tag = tag;
-        bm_i2c_hal_poll_on_sample(d->poller, i2c_emit_notify, d);
+        atomic_store(&d->emitting, true);
     }
+    /* Always count the stored samples (with no event the notify only counts). */
+    bm_i2c_hal_poll_on_sample(d->poller, i2c_emit_notify, d);
+
+    d->poll_hz = (uint32_t) hz;
+    if (d->paused) {   /* a new poll() resumes a stopped poller */
+        bm_i2c_hal_poll_pause(d->poller, false);
+        d->paused = false;
+    }
+    if (d->poller_obj) {
+        RETURN_OBJ_COPY(d->poller_obj);
+    }
+    i2c_poller_rec_t *rec = pemalloc(sizeof(*rec), 1);
+    rec->d = d;
+    rec->dev_obj = Z_OBJ_P(ZEND_THIS);
+    GC_ADDREF(rec->dev_obj);   /* the handle keeps the device object alive; the device does not keep the handle */
+    d->poller_obj = bm_events_source_new(i2c_poller_ce, &poller_ops, rec);
+    if (!d->poller_obj) {
+        OBJ_RELEASE(rec->dev_obj);
+        pefree(rec, 1);
+        RETURN_THROWS();
+    }
+    RETURN_OBJ(d->poller_obj);   /* the caller owns the only reference; the device holds none */
 }
 
 PHP_METHOD(I2cDevice, sample)
@@ -344,7 +539,19 @@ PHP_METHOD(I2cDevice, drain)
     }
     size_t sz = d->driver->poll.sample_size;
     uint8_t *buf = emalloc(POLL_DRAIN_CAP * sz);
+    /* The ring keeps the last depth samples: older unread ones were overwritten. */
+    uint32_t stored = atomic_load(&d->stored);
+    uint32_t rd = atomic_load(&d->read);
+    if ((int32_t) (stored - rd) > (int32_t) d->depth) {
+        rd = stored - d->depth;
+    }
     size_t n = bm_i2c_hal_poll_drain(d->poller, buf, POLL_DRAIN_CAP);
+    rd += (uint32_t) n;
+    stored = atomic_load(&d->stored);
+    if ((int32_t) (stored - rd) < 0) {
+        rd = stored;   /* never past stored: a sample may be drained before its notify counted it */
+    }
+    atomic_store(&d->read, rd);
     for (size_t i = 0; i < n; i++) {
         add_next_index_stringl(return_value, (char *) (buf + i * sz), sz);
     }
@@ -415,8 +622,17 @@ void i2c_events_register(void)
         return;
     }
     zend_class_entry ce;
+    zend_class_entry *generic;
+    zval undef;
+    ZVAL_UNDEF(&undef);
+    INIT_NS_CLASS_ENTRY(ce, "Baremetal\\I2c", "SamplesReady", NULL);
+    generic = zend_register_internal_class_ex(&ce, base);
+    zend_declare_typed_property(generic, zend_string_init_interned("count", 5, 1), &undef,
+                                ZEND_ACC_PUBLIC | ZEND_ACC_READONLY, NULL,
+                                (zend_type) ZEND_TYPE_INIT_CODE(IS_LONG, 0, 0));
+    i2c_samples_ready_ce = generic;
     INIT_NS_CLASS_ENTRY(ce, "Baremetal\\Sensor\\Imu", "SamplesReady", NULL);
-    zend_register_internal_class_ex(&ce, base);
+    zend_register_internal_class_ex(&ce, generic);
 }
 
 void i2c_driver_classes_register(void)

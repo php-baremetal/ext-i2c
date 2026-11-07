@@ -45,7 +45,7 @@ sleep automatically whenever every task is waiting.
 - `new Bus(..., owner: Bus::CORE1)` throws while power-save is on:
   `Bus::CORE1 is not available with the power-save option; use Bus::SYNC`. Use `Bus::SYNC`.
 - `poll()` is accepted on a `SYNC` bus, but the sampler wakes the chip once per period, so the chip never
-  sleeps longer than `1000 / $hz` ms. ext-i2c has no call that stops a sampler, so keep rates low and start
+  sleeps longer than `1000 / $hz` ms. `poll()` returns a `Baremetal\I2c\Poller`; its `stop()` pauses the sampler, and a stopped sampler does not wake the chip (see [Background sampling](../usage/polling-and-events.md#the-poller)). Keep rates low and start
   one only when the project needs it.
 - Buses are not closed around light sleep; the descriptor's sleep hooks are not called by ext-i2c (see
   [Writing a driver](../drivers/writing-a-driver.md)).

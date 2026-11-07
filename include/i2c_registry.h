@@ -22,7 +22,13 @@
 #include "bm_i2c.h"            /* bm_err_t + the driver-facing transport decls */
 #include "i2c_driver_desc.h"
 #include <stdint.h>
+#include <stdatomic.h>
+
 #include <stdbool.h>
+
+/* Ring depth the executor gives poll(): 0 means 64, above 256 or negative means 256 (size_t wraps) (esp32-executor, executor_poll). */
+#define I2C_POLL_DEFAULT_DEPTH 64u
+#define I2C_POLL_MAX_DEPTH     256u
 
 #define I2C_PORT_AUTO      (-1)
 #define I2C_DEFAULT_HZ     (100000u)
@@ -56,6 +62,15 @@ struct i2c_dev {
     void                    *poller;   /* HAL poller once poll() is called, or NULL */
     void                    *emit_obj; /* the PHP device object (zend_object*) $e->device when emitting */
     uint16_t                 emit_tag; /* event source tag emitted on each new sample */
+    uint32_t                 depth;    /* ring depth of the running poller (PHP task) */
+    atomic_uint              stored;   /* samples stored since poll(); incremented on the poller task */
+    atomic_uint              read;     /* samples taken by drain(); PHP task */
+    atomic_uint              every;    /* one event every `every` stored samples */
+    atomic_bool              emitting; /* an event class is set: the notify raises events */
+    atomic_uint              since;    /* samples since the last event; poller task (poll() zeroes it) */
+    struct _zend_object     *poller_obj;   /* the live Baremetal\I2c\Poller handle, or NULL; weak (no reference held) */
+    uint32_t                 poll_hz;  /* sampling rate asked for (poll(), setHz()); PHP task */
+    bool                     paused;   /* the poller is stopped by Poller::stop(); PHP task */
 };
 
 /* Reset the tables. Runs once at MINIT; creates nothing on the wire. */

@@ -1,7 +1,13 @@
 # Changelog
 
-## 1.0.3
+## 1.1.0
 
+- Added: Device::poll() returns the device's Baremetal\I2c\Poller (a Baremetal\Source; the same object on every call): stop() pauses sampling, unread samples stay for drain(); start(); setHz() and hz(). Needs php-baremetal/i2c-hal 1.1.
+- Added: Baremetal\I2c\SamplesReady with $count (unread samples in the device's ring at delivery), filled by poll() when the event class extends it; Baremetal\Sensor\Imu\SamplesReady now extends it. poll() takes every: N (one event every N stored samples).
+- Changed: Baremetal\I2c\SamplesReady declares public readonly int $count, so a user class that extends it (or Baremetal\Sensor\Imu\SamplesReady) and redeclares $count no longer compiles.
+- Added: poll() takes coalesce (default true): a sample event is not queued while one of the same event class is still waiting; Events::stats() counts it as coalesced. coalesce: false queues every sample. Requires php-baremetal/ext-events ^1.1.
+- Added: Bus::onboard(), from the board's i2c block.
+- Added: extra.baremetal.board-blocks: ["i2c:i2c"], so phpbm offers this package as a board feature.
 - Docs: errors and limits say that a read can complete with wrong bytes while a line is shorted or bouncing.
 
 ## 1.0.2

@@ -64,6 +64,8 @@ void *bm_i2c_hal_poll_start(i2c_dev_t *d, uint32_t hz, size_t depth);
 void bm_i2c_hal_poll_on_sample(void *poller, void (*notify)(void *arg), void *arg);
 bool bm_i2c_hal_poll_latest(void *poller, void *out);
 size_t bm_i2c_hal_poll_drain(void *poller, void *out, size_t max_samples);
+/* Pause (true) or resume (false) the poller: paused, it stores no samples; unread samples stay. Since i2c-hal 1.1. */
+void bm_i2c_hal_poll_pause(void *poller, bool paused);
 
 /* Printable name of a bm_err_t. */
 const char *bm_i2c_hal_err_name(bm_err_t err);

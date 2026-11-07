@@ -63,7 +63,7 @@ string: use `ord()` for one byte, `unpack()` for more. `\ValueError` when `$leng
 Writes to register `$reg`. An `int` writes one byte (the low 8 bits); a `string` writes all its bytes after the
 register address.
 
-<!-- @method name="Device::poll(int $hz, int $depth = 64, ?string $event = null): void" returns="void" visibility="public" -->
+<!-- @method name="Device::poll(int $hz, int $depth = 64, ?string $event = null, bool $coalesce = true, int $every = 1): Baremetal\I2c\Poller" returns="Baremetal\I2c\Poller" visibility="public" -->
 
 <!-- @method name="Device::sample(): ?string" returns="?string" visibility="public" -->
 

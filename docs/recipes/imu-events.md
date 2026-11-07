@@ -66,13 +66,14 @@ $imu = new Qmi8658(new Bus(sda: 11, scl: 10));
 $seen = 0;
 
 Events::listen(SamplesReady::class, function (SamplesReady $e) use (&$seen): void {
+    echo "{$e->count} samples ready\n";   // unread samples in the ring at delivery
     foreach ($e->device->drain() as $raw) {
         ['accel' => [$ax, $ay, $az]] = $e->device->decode($raw);
         printf("#%d accel [% .2f % .2f % .2f] g\n", ++$seen, $ax, $ay, $az);
     }
 });
 
-$imu->poll(hz: 10, depth: 32, event: SamplesReady::class);
+$imu->poll(hz: 10, depth: 32, event: SamplesReady::class, every: 10);
 
 echo "imu-events: sampling at 10 Hz\n";
 ```
@@ -81,7 +82,14 @@ echo "imu-events: sampling at 10 Hz\n";
 ## How it works
 
 - `poll()` starts a sampler on the executor task: every 100 ms it reads 12 bytes from the chip into a ring of
-  32 samples, then posts a `SamplesReady` event carrying the device.
+  32 samples, then posts a `SamplesReady` event carrying the device. `poll()` coalesces by default: while a
+  `SamplesReady` is still waiting, a new sample does not queue another one, so one event can cover several
+  samples. The listener drains the ring with `drain()`, so none is lost; pass `coalesce: false` for one event per
+  sample.
+- `every: 10` raises one event per 10 stored samples (once a second here); `$e->count` is the number of samples
+  waiting in the ring when the event is delivered.
+- `poll()` returns the device's `Baremetal\I2c\Poller`: `$poller->setHz(50)` changes the rate later, and
+  `stop()` / `start()` pause and resume the sampling (the unread samples stay for `drain()`).
 - The reactor delivers the event on the PHP task; `$e->device` is the `Qmi8658` object.
 - `drain()` returns the unread samples from the ring, oldest first, without touching the bus. If events were
   dropped because the queue was full, the next `drain()` still returns those samples.

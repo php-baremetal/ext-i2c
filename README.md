@@ -22,6 +22,8 @@ Add a device driver the same way; a driver requires ext-i2c, so it is enough on 
 composer require php-baremetal/imu-qmi8658
 ```
 
+It declares the board block `i2c:i2c`, so `phpbm init` and `phpbm board` offer it on boards with an I2C bus.
+
 ## Example
 
 ```php

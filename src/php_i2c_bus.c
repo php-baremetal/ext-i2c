@@ -18,6 +18,8 @@
 #include "php_i2c.h"
 #include "bm_i2c_hal.h"
 #include "zend_exceptions.h"
+#include "bm_board.h"
+#include "ext/spl/spl_exceptions.h"
 #include "event_bus_php.h"   /* bm_events_power_save: CORE1 is rejected under power-save */
 
 zend_class_entry *i2c_bus_ce;
@@ -45,6 +47,11 @@ ZEND_BEGIN_ARG_INFO_EX(arginfo_bus_ctor, 0, 0, 2)
     ZEND_ARG_TYPE_INFO_WITH_DEFAULT_VALUE(0, owner, IS_LONG, 0, "0")
 ZEND_END_ARG_INFO()
 
+ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO_EX(arginfo_bus_onboard, 0, 0, Baremetal\\I2c\\Bus, 0)
+    ZEND_ARG_TYPE_INFO_WITH_DEFAULT_VALUE(0, block, IS_STRING, 0, "'i2c'")
+    ZEND_ARG_TYPE_INFO_WITH_DEFAULT_VALUE(0, owner, IS_LONG, 0, "0")
+ZEND_END_ARG_INFO()
+
 ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO_EX(arginfo_bus_device, 0, 1, Baremetal\\I2c\\Device, 0)
     ZEND_ARG_TYPE_INFO(0, address, IS_LONG, 0)
     ZEND_ARG_TYPE_INFO_WITH_DEFAULT_VALUE(0, hz, IS_LONG, 0, "100000")
@@ -52,6 +59,32 @@ ZEND_END_ARG_INFO()
 
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_bus_scan, 0, 0, IS_ARRAY, 0)
 ZEND_END_ARG_INFO()
+
+/* The one way to open a bus: the constructor and onboard() both end here. Throws and returns false on failure. */
+static bool i2c_bus_open(zend_object *obj, zend_long sda, zend_long scl, zend_long port, zend_long owner,
+                         uint32_t owner_arg)
+{
+    if (owner != I2C_OWNER_SYNC && owner != I2C_OWNER_CORE1) {
+        zend_argument_value_error(owner_arg, "must be Bus::SYNC or Bus::CORE1");
+        return false;
+    }
+
+    if (owner == I2C_OWNER_CORE1 && bm_events_power_save()) {
+        zend_throw_exception(zend_ce_exception,
+            "Bus::CORE1 is not available with the power-save option; use Bus::SYNC", 0);
+        return false;
+    }
+
+    bm_err_t err = BM_OK;
+    i2c_bus_t *bus = i2c_bus_get((int) port, (int) sda, (int) scl, (i2c_owner_t) owner, &err);
+    if (!bus) {
+        zend_throw_exception_ex(zend_ce_exception, 0,
+            "cannot open I2C bus (sda=%d scl=%d): %s", (int) sda, (int) scl, bm_i2c_hal_err_name(err));
+        return false;
+    }
+    i2c_bus_object_from(obj)->bus = bus;
+    return true;
+}
 
 PHP_METHOD(I2cBus, __construct)
 {
@@ -64,25 +97,47 @@ PHP_METHOD(I2cBus, __construct)
         Z_PARAM_LONG(owner)
     ZEND_PARSE_PARAMETERS_END();
 
-    if (owner != I2C_OWNER_SYNC && owner != I2C_OWNER_CORE1) {
-        zend_argument_value_error(4, "must be Bus::SYNC or Bus::CORE1");
+    if (!i2c_bus_open(Z_OBJ_P(ZEND_THIS), sda, scl, port, owner, 4)) {
+        RETURN_THROWS();
+    }
+}
+
+PHP_METHOD(I2cBus, onboard)
+{
+    char *block = "i2c";
+    size_t block_len = sizeof("i2c") - 1;
+    zend_long owner = I2C_OWNER_SYNC;
+    ZEND_PARSE_PARAMETERS_START(0, 2)
+        Z_PARAM_OPTIONAL
+        Z_PARAM_STRING(block, block_len)
+        Z_PARAM_LONG(owner)
+    ZEND_PARSE_PARAMETERS_END();
+
+    const char *type = bm_board_type(block);
+    if (!type) {
+        zend_throw_exception_ex(spl_ce_RuntimeException, 0, "board '%s' has no '%s' block", bm_board_id(), block);
+        RETURN_THROWS();
+    }
+    if (strcmp(type, "i2c") != 0) {
+        zend_throw_exception_ex(spl_ce_RuntimeException, 0, "board '%s' has a %s of type '%s', not 'i2c'",
+            bm_board_id(), block, type);
+        RETURN_THROWS();
+    }
+    int sda, scl;
+    if (!bm_board_int(block, "sda", &sda)) {
+        zend_throw_exception_ex(spl_ce_RuntimeException, 0, "board '%s': %s.sda is missing", bm_board_id(), block);
+        RETURN_THROWS();
+    }
+    if (!bm_board_int(block, "scl", &scl)) {
+        zend_throw_exception_ex(spl_ce_RuntimeException, 0, "board '%s': %s.scl is missing", bm_board_id(), block);
         RETURN_THROWS();
     }
 
-    if (owner == I2C_OWNER_CORE1 && bm_events_power_save()) {
-        zend_throw_exception(zend_ce_exception,
-            "Bus::CORE1 is not available with the power-save option; use Bus::SYNC", 0);
+    object_init_ex(return_value, i2c_bus_ce);
+    if (!i2c_bus_open(Z_OBJ_P(return_value), sda, scl, I2C_PORT_AUTO, owner, 2)) {
+        zval_ptr_dtor(return_value);
         RETURN_THROWS();
     }
-
-    bm_err_t err = BM_OK;
-    i2c_bus_t *bus = i2c_bus_get((int) port, (int) sda, (int) scl, (i2c_owner_t) owner, &err);
-    if (!bus) {
-        zend_throw_exception_ex(zend_ce_exception, 0,
-            "cannot open I2C bus (sda=%d scl=%d): %s", (int) sda, (int) scl, bm_i2c_hal_err_name(err));
-        RETURN_THROWS();
-    }
-    i2c_bus_object_from(Z_OBJ_P(ZEND_THIS))->bus = bus;
 }
 
 PHP_METHOD(I2cBus, device)
@@ -156,6 +211,7 @@ PHP_METHOD(I2cBus, scan)
 
 static const zend_function_entry i2c_bus_methods[] = {
     PHP_ME(I2cBus, __construct, arginfo_bus_ctor,   ZEND_ACC_PUBLIC)
+    PHP_ME(I2cBus, onboard,     arginfo_bus_onboard, ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
     PHP_ME(I2cBus, device,      arginfo_bus_device, ZEND_ACC_PUBLIC)
     PHP_ME(I2cBus, scan,        arginfo_bus_scan,   ZEND_ACC_PUBLIC)
     PHP_FE_END

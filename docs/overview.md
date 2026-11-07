@@ -121,7 +121,8 @@ function loop(): void
 | `Baremetal\I2c\Device` | class | One chip on a bus: `probe()`, `read()`, `write()`, `readReg()`, `writeReg()`, `poll()`, `sample()`, `drain()`. |
 | `Baremetal\I2c\Driver\*` | classes | One per installed driver package, each extends `Device`. |
 | `Baremetal\Sensor\Imu`, `Baremetal\Sensor\Magnetometer`, `Baremetal\Input\Touch` | interfaces | Capability markers a driver class implements. Always defined. |
-| `Baremetal\Sensor\Imu\SamplesReady` | class | Event a polled device can raise; extends `Baremetal\Event`. |
+| `Baremetal\I2c\SamplesReady` | class | Event a polled device can raise, with `$count` (unread samples); extends `Baremetal\Event`. |
+| `Baremetal\Sensor\Imu\SamplesReady` | class | The IMU flavour; extends `Baremetal\I2c\SamplesReady`. |
 
 The extension defines no functions. Failures throw `\Exception` with a readable message; invalid arguments throw
 `\ValueError`. See [Errors and limits](./reference/errors-and-limits.md).

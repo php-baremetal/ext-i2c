@@ -11,9 +11,9 @@
     ],
     "require": {
         "php": ">=8.3",
-        "php-baremetal/i2c-hal": "^1.0",
-        "php-baremetal/ext-events": "^1.0",
-        "php-baremetal/bm-common": "^1.0"
+        "php-baremetal/i2c-hal": "^1.1",
+        "php-baremetal/ext-events": "^1.1",
+        "php-baremetal/bm-common": "^1.1"
     },
     "extra": {
         "baremetal": {
@@ -24,7 +24,8 @@
                     "type": "i2c_driver_desc_t",
                     "header": "i2c_driver_desc.h"
                 }
-            }
+            },
+            "board-blocks": ["i2c:i2c"]
         }
     }
 }

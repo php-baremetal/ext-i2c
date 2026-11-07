@@ -63,6 +63,7 @@ static inline i2c_device_object *i2c_device_object_from(zend_object *o)
 
 void i2c_bus_class_register(void);
 void i2c_device_class_register(void);
+void i2c_poller_class_register(void);   /* after ext-events: extends Baremetal\\Source */
 
 /* Register the capability interfaces (Sensor\Imu, Input\Touch, Sensor\Magnetometer). */
 void i2c_capabilities_register(void);

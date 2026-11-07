@@ -43,6 +43,23 @@ Throws `\ValueError` when `$owner` is neither constant, and `\Exception` when:
 
 The bus is reset right after it opens, which frees a slave left holding SDA by an interrupted transfer.
 
+## onboard()
+
+<!-- @method name="Bus::onboard(string $block = 'i2c', int $owner = Bus::SYNC): Bus" returns="Bus" visibility="public" static -->
+
+Opens the bus the board describes in its `i2c` block (`sda` and `scl`), the same as
+`new Bus($sda, $scl, -1, $owner)` with the pins read from the board. `$block` names another block of the
+same kind, and `$owner` is as in the constructor.
+
+```php
+$bus = Bus::onboard();
+```
+
+Throws `\RuntimeException` `board '<id>' has no '<block>' block` when the board lacks the block,
+`board '<id>' has a <block> of type '<type>', not 'i2c'` when the block is not an I2C bus, and
+`board '<id>': <block>.sda is missing` (or `.scl`) when a pin is not set. Opening the bus throws what the
+constructor throws.
+
 ## Constants
 
 | Constant | Value | Meaning |
