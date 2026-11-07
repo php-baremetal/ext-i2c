@@ -137,9 +137,9 @@ Driver classes implement a capability interface, so a handler can accept any chi
 | --- | --- |
 | `Baremetal\Sensor\Imu` | `Qmi8658` |
 | `Baremetal\Sensor\Magnetometer` | `Mmc5603` |
-| `Baremetal\Input\Touch` | no packaged driver yet |
+| `Baremetal\Input\Touch` (from ext-input) | `Cst816s` ([touch-cst816s](package:php-baremetal/touch-cst816s)) |
 
-The three interfaces are always defined, so type hints resolve even when no driver for them is installed. A
+The IMU and magnetometer interfaces are always defined, so type hints resolve even when no driver for them is installed. A
 driver may also name a new interface; ext-i2c creates it on demand.
 
 <!-- @callout variant="note" title="Where the work runs" -->

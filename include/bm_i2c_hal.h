@@ -67,5 +67,31 @@ size_t bm_i2c_hal_poll_drain(void *poller, void *out, size_t max_samples);
 /* Pause (true) or resume (false) the poller: paused, it stores no samples; unread samples stay. Since i2c-hal 1.1. */
 void bm_i2c_hal_poll_pause(void *poller, bool paused);
 
+/* Interrupt-driven service (since i2c-hal 1.2), for a driver whose descriptor has irq.supported: the HAL
+ * services the device's INT line and runs d->driver->irq.service(d) on the task that owns the I2C bus (the
+ * executor), so the service may call the device's read and write functions. It must not touch PHP.
+ *
+ * bm_i2c_hal_irq_start: configures `pin` as an input with pull-up and an interrupt on the falling edge. Each edge
+ * kicks the service from the interrupt handler; kicks that arrive before the service runs merge into one run, so
+ * the service must read everything the chip has pending. The bm_err_t the service returns is for logging only; it
+ * does not stop the service. Returns the handle, or NULL when it cannot.
+ * A handle is for one device; ext-i2c starts a device once and keeps the handle. */
+void *bm_i2c_hal_irq_start(i2c_dev_t *d, int pin);
+/* One more service run after `ms` milliseconds, for a driver that must re-check without an edge (a chip that
+ * holds its line low, or a gesture that finishes later). It replaces a delayed run that is still pending; it does
+ * not touch the edge-driven runs. It may be called from inside the service. */
+void bm_i2c_hal_irq_after(void *h, uint32_t ms);
+/* Pause (true): new edges are dropped, not queued, and a delayed run (after) or an edge run that is pending but
+ * not yet taken is dropped; a run already taken by the executor completes. Resume (false): only un-pauses; on a
+ * handle that is not paused it is a no-op (a pending run or delayed run survives). A driver pauses and resumes
+ * freely. */
+void bm_i2c_hal_irq_pause(void *h, bool paused);
+/* For ext-i2c only; a driver never calls it (it uses after / pause), and ext-i2c does not either: the service
+ * lives until the process ends, so the device's handle is never left dangling.
+ * Stop the service and release the pin. It waits out a service run that is in progress; once it returns,
+ * irq.service is never called again for this handle, and the handle is invalid. Called from inside the service
+ * itself, it runs inline (it does not wait for itself). */
+void bm_i2c_hal_irq_stop(void *h);
+
 /* Printable name of a bm_err_t. */
 const char *bm_i2c_hal_err_name(bm_err_t err);

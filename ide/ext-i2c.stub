@@ -21,17 +21,6 @@ namespace Baremetal\Sensor {
     }
 }
 
-namespace Baremetal\Input {
-    /**
-     * Capability marker of a touch controller driver class (no packaged driver yet). No methods.
-     *
-     * Always defined, so type hints resolve even when no driver for it is installed.
-     */
-    interface Touch
-    {
-    }
-}
-
 namespace Baremetal\I2c {
     /**
      * The event a polled device can raise (poll(event: ...)), with the number of unread samples.

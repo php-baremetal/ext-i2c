@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.1
+
+- Added: the irq block of the driver descriptor is served: bm_i2c_device_irq() starts a driver's interrupt service (its INT line serviced on the executor). Requires php-baremetal/i2c-hal ^1.2.
+- Added: bm_i2c_device_dev(), the registry device of a Device object, and bm_i2c_dev_state(), the per-instance state block (state_size bytes, zeroed) of a registry device, in bm_i2c_driver.h.
+- Changed: ext-i2c no longer registers an empty Baremetal\Input\Touch marker interface up front; ext-input defines it with its methods (a second registration of the name replaced it). Without ext-input the name exists only once a driver declaring it is registered.
+
 ## 1.1.0
 
 - Added: ide/ext-i2c.stub, the PHP declarations of the package for IDEs (conductor copies it into vendor/php-baremetal/ide-stubs/).

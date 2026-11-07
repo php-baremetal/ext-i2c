@@ -65,7 +65,7 @@ void i2c_bus_class_register(void);
 void i2c_device_class_register(void);
 void i2c_poller_class_register(void);   /* after ext-events: extends Baremetal\\Source */
 
-/* Register the capability interfaces (Sensor\Imu, Input\Touch, Sensor\Magnetometer). */
+/* Register the capability interfaces (Sensor\Imu, Sensor\Magnetometer). */
 void i2c_capabilities_register(void);
 
 /* Register the driver-emitted event classes (Baremetal\Sensor\Imu\SamplesReady, extends Event). */

@@ -54,6 +54,43 @@ i2c_dev_t *i2c_device_this(zval *zthis)
 }
 #define this_dev i2c_device_this
 
+i2c_dev_t *bm_i2c_device_dev(zend_object *dev)
+{
+    if (!dev || !instanceof_function(dev->ce, i2c_device_ce)) {
+        return NULL;
+    }
+    return i2c_device_object_from(dev)->dev;
+}
+
+void *bm_i2c_dev_state(i2c_dev_t *d)
+{
+    return d ? d->state : NULL;
+}
+
+/* The interrupt service lives in the registry device, which outlives the PHP object. Nothing stops it (like the
+ * poller, it runs until the process ends), so d->irq is never left dangling. The pin of the first call is the
+ * one in use; a later call with another pin returns the same handle. */
+void *bm_i2c_device_irq(zend_object *dev, int pin)
+{
+    i2c_dev_t *d = bm_i2c_device_dev(dev);
+    if (!d) {
+        zend_throw_exception(zend_ce_exception, "I2c\\Device is not initialised", 0);
+        return NULL;
+    }
+    if (!d->driver || !d->driver->irq.supported || !d->driver->irq.service) {
+        zend_throw_error(NULL, "%s: the driver has no interrupt service", ZSTR_VAL(dev->ce->name));
+        return NULL;
+    }
+    if (d->irq) {
+        return d->irq;
+    }
+    d->irq = bm_i2c_hal_irq_start(d, pin);
+    if (!d->irq) {
+        zend_throw_error(NULL, "%s: cannot start the interrupt service on pin %d", ZSTR_VAL(dev->ce->name), pin);
+    }
+    return d->irq;
+}
+
 ZEND_BEGIN_ARG_INFO_EX(arginfo_device_ctor, 0, 0, 2)
     ZEND_ARG_OBJ_INFO(0, bus, Baremetal\\I2c\\Bus, 0)
     ZEND_ARG_TYPE_INFO(0, address, IS_LONG, 0)
@@ -587,11 +624,11 @@ void i2c_device_class_register(void)
 void i2c_capabilities_register(void)
 {
     /* Marker interfaces registered up front so a type hint like `Baremetal\Sensor\Imu` resolves even when
-     * no driver providing it is built. Other capability FQNs are created on demand. */
+     * no driver providing it is built. Other capability FQNs are created on demand. Baremetal\Input\Touch is not here:
+     * ext-input defines it (with its methods; it starts before ext-i2c), and registering a marker of the same
+     * name would replace it. A driver naming it without ext-input gets an empty marker, created on demand. */
     zend_class_entry ce;
     INIT_NS_CLASS_ENTRY(ce, "Baremetal\\Sensor", "Imu", NULL);
-    zend_register_internal_interface(&ce);
-    INIT_NS_CLASS_ENTRY(ce, "Baremetal\\Input", "Touch", NULL);
     zend_register_internal_interface(&ce);
     INIT_NS_CLASS_ENTRY(ce, "Baremetal\\Sensor", "Magnetometer", NULL);
     zend_register_internal_interface(&ce);

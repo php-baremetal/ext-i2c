@@ -60,6 +60,7 @@ struct i2c_dev {
     const i2c_driver_desc_t *driver;   /* NULL for a raw device */
     void                    *state;    /* driver per-instance state (state_size), or NULL */
     void                    *poller;   /* HAL poller once poll() is called, or NULL */
+    void                    *irq;      /* HAL interrupt service once bm_i2c_device_irq() started it, or NULL; PHP task */
     void                    *emit_obj; /* the PHP device object (zend_object*) $e->device when emitting */
     uint16_t                 emit_tag; /* event source tag emitted on each new sample */
     uint32_t                 depth;    /* ring depth of the running poller (PHP task) */

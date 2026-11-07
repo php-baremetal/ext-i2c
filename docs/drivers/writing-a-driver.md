@@ -142,15 +142,54 @@ that). ext-i2c 1.0 reads these:
 | `capability` | Interface FQN the class implements, e.g. `"Baremetal\\Sensor\\Imu"`, or `NULL`. A name that does not exist yet is registered as a new marker interface. |
 | `default_addrs`, `n_default_addrs` | Default address when the constructor gets none: `default_addrs[0]` when `n_default_addrs` is not 0; with no default the address must be passed (else `\ValueError`). The other entries are not tried. |
 | `default_hz` | Default clock when the constructor gets none; 0 means 100 kHz. |
-| `state_size` | Bytes allocated (zeroed) per device before `init`. The driver-facing header has no accessor for this block, so drivers in this release keep it 0. |
+| `state_size` | Bytes allocated (zeroed) per device before `init`. Reach it with `bm_i2c_dev_state(d)` (from `bm_i2c_driver.h`); `NULL` when the size is 0. |
 | `init` | Called once when the device is first created, on the PHP task. Return `BM_OK`, or an error code that the constructor reports (`BM_ERR_NOT_FOUND` for a wrong chip identity). |
 | `methods` | The class's method table (`zend_function_entry[]`). |
 | `poll.sample` | Reads one sample into `out`. Runs on the executor task: transport functions only, no PHP, no Zend allocator. |
 | `poll.sample_size` | Bytes per sample, 1 to 64. Both `sample` and `sample_size` must be set for `poll()` to work. |
 
 Declared but not read by ext-i2c 1.0, so they have no effect yet: `deinit` (devices are never torn down),
-`poll.max_hz` (the rate is not capped), and the `fifo`, `block`, `irq`, `power` and `events` / `n_events` blocks.
-Filling them is harmless; do not rely on them.
+`poll.max_hz` (the rate is not capped), and the `fifo`, `block`, `power` and `events` / `n_events` blocks.
+Filling them is harmless; do not rely on them. The `irq` block is read since ext-i2c 1.1.1 (next section).
+
+## Interrupt service
+
+A chip with an interrupt line (a touch controller, for example) sets `irq.supported = true` and an
+`irq.service` function. The driver starts it from one of its methods with `bm_i2c_device_irq()`:
+
+<!-- @code-block language="c" label="Starting the service" -->
+```c
+static bm_err_t xyz_service(i2c_dev_t *d)
+{
+    /* Runs on the task that owns the I2C bus (the executor): it may call i2c_dev_read_reg() and the other
+     * transport functions, but not PHP. Read everything the chip has pending. */
+    uint8_t status[4];
+    return i2c_dev_read_reg(d, 0x01, status, sizeof(status));
+}
+
+/* in a method, with `zend_object *self = Z_OBJ_P(ZEND_THIS)` */
+void *irq = bm_i2c_device_irq(self, int_pin);   /* NULL and an \Error when it cannot */
+```
+<!-- @endcode-block -->
+
+`bm_i2c_device_irq(zend_object *dev, int pin)` (declared in `bm_i2c_driver.h`) configures `pin` as an input with
+pull-up and an interrupt on the falling edge; at each edge the HAL runs `irq.service(d)`. Edges that arrive before
+a run starts merge into one run. It starts the service once per device: a second call returns the same handle.
+It throws `\Error` (`<Class>: the driver has no interrupt service`) when `irq.supported` is false or `service` is
+NULL. When the HAL cannot start it, the `\Error` has another message (`<Class>: cannot
+start the interrupt service on pin N`). Call it on the PHP task only; the service lives until shutdown.
+`bm_i2c_device_dev(zend_object *dev)` returns the `i2c_dev_t *` of a driver object (NULL for any other object).
+The pin of the first call is the one in use; a later call with another pin returns the same handle.
+
+The service gets only the `i2c_dev_t *`. Its context (a finger-down flag, the HAL handle for `after()`, an event
+tag) goes in the driver state: set `state_size` and call `bm_i2c_dev_state(d)`, which returns the zeroed block
+allocated with the device. Set it from the method that starts the service, before `bm_i2c_device_irq()`.
+The `bm_err_t` the service returns is only logged. The service may call `bm_i2c_hal_irq_after()`.
+
+The HAL handle is for the `bm_i2c_hal_irq_after()` (one more run after some milliseconds) and
+`bm_i2c_hal_irq_pause()` calls of `bm_i2c_hal.h`. A driver never stops the service (`bm_i2c_hal_irq_stop()` is for
+ext-i2c; the service lives until shutdown). `pause(true)` drops new edges and a pending `after()` run, while a run
+already taken completes; `pause(false)` on a handle that is not paused does nothing. This needs a HAL that provides `php-baremetal/i2c-hal` 1.2.
 
 ## Transport functions
 
